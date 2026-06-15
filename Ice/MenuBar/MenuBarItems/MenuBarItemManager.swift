@@ -294,8 +294,13 @@ extension MenuBarItemManager {
 
         for item in items where context.isValidForCaching(item) {
             if item.sourcePID == nil {
-                logger.warning("Missing sourcePID for \(item.logString, privacy: .public)")
-                context.shouldClearCachedItemWindowIDs = true
+                // On macOS 26, the source PID can't be resolved for some items
+                // (see MenuBarItemService). This is an expected steady state, not
+                // a transient error, so don't force a re-cache for it: doing so
+                // clears the cached window IDs every cycle and thrashes the cache.
+                // Resolution retries are handled by the backoff in
+                // MenuBarItemService.Connection.
+                logger.debug("Missing sourcePID for \(item.logString, privacy: .public)")
             }
 
             if let temp = temporarilyShownItemContexts.first(where: { $0.tag == item.tag }) {
