@@ -93,11 +93,15 @@ func CGSManagedDisplayGetCurrentSpace(
     _ displayUUID: CFString
 ) -> CGSSpaceID
 
+// Returns the raw value rather than `CGSSpaceType`: the window server may
+// return a type outside the known cases on a newer macOS, and decoding an
+// unknown value directly into the enum would trap. Callers construct the
+// enum via its failable initializer.
 @_silgen_name("CGSSpaceGetType")
 func CGSSpaceGetType(
     _ cid: CGSConnectionID,
     _ sid: CGSSpaceID
-) -> CGSSpaceType
+) -> UInt32
 
 // MARK: - CGSWindow
 
