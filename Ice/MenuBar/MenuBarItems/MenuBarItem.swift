@@ -358,6 +358,20 @@ private extension MenuBarItemTag.Namespace {
     /// and the source pid belongs to the application that created it.
     @available(macOS 26.0, *)
     init(uncheckedItemWindow itemWindow: WindowInfo, sourcePID: pid_t?) {
+        // Ice's own control items are identified by their window title (set via
+        // the status item's autosaveName). Recognize them directly instead of
+        // relying on source PID resolution: that resolution is unreliable on
+        // macOS 26, and a failure would mislabel a control item with a UUID
+        // namespace — breaking control item lookup (the section boundaries) and
+        // thrashing the menu bar item cache.
+        if
+            let title = itemWindow.title,
+            ControlItem.Identifier(rawValue: title) != nil
+        {
+            self = .ice
+            return
+        }
+
         // Most apps have a bundle ID, but we should be able to handle apps
         // that don't. We should also be able to handle daemons and helpers,
         // which are more likely not to have a bundle ID.
