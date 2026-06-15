@@ -3,6 +3,7 @@
 //  Ice
 //
 
+import CoreGraphics
 import Foundation
 import OSLog
 
@@ -23,6 +24,18 @@ extension MenuBarItemService {
 
         /// The connection's logger.
         private let logger: Logger
+
+        /// Window IDs whose source PID resolution recently failed, paired with
+        /// the time of the most recent failure.
+        ///
+        /// The service can't resolve some items (e.g. Control Center-hosted
+        /// items on macOS 26). Without backing off, those windows are re-queried
+        /// every cache cycle, flooding the connection with synchronous XPC calls
+        /// that block the cooperative thread pool and burn CPU.
+        private let failedWindows = OSAllocatedUnfairLock(initialState: [CGWindowID: ContinuousClock.Instant]())
+
+        /// How long to skip re-querying a window after a failed resolution.
+        private static let failureBackoff = Duration.seconds(60)
 
         /// Creates a new connection.
         private init() {
@@ -54,7 +67,22 @@ extension MenuBarItemService {
 
         /// Returns the source process identifier for the given window.
         func sourcePID(for window: WindowInfo) async -> pid_t? {
-            await withCheckedContinuation { continuation in
+            let windowID = window.windowID
+            let now = ContinuousClock.now
+
+            // Skip windows that recently failed to resolve, so we don't query
+            // the service for them on every cache cycle.
+            let isBackingOff = failedWindows.withLock { failed in
+                guard let failedAt = failed[windowID] else {
+                    return false
+                }
+                return now - failedAt < Self.failureBackoff
+            }
+            if isBackingOff {
+                return nil
+            }
+
+            let pid: pid_t? = await withCheckedContinuation { continuation in
                 guard let response = session.send(request: .sourcePID(window)) else {
                     logger.error("Source PID request returned nil")
                     continuation.resume(returning: nil)
@@ -67,6 +95,18 @@ extension MenuBarItemService {
                     continuation.resume(returning: nil)
                 }
             }
+
+            failedWindows.withLock { failed in
+                if pid == nil {
+                    // Drop expired entries so this cache stays bounded.
+                    failed = failed.filter { now - $0.value < Self.failureBackoff }
+                    failed[windowID] = now
+                } else {
+                    failed.removeValue(forKey: windowID)
+                }
+            }
+
+            return pid
         }
     }
 }

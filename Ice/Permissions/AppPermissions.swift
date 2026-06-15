@@ -36,7 +36,7 @@ final class AppPermissions: ObservableObject {
     @Published private(set) var permissionsState: PermissionsState = .missing
 
     /// Storage for internal observers.
-    private var cancellable: AnyCancellable?
+    private var cancellables = Set<AnyCancellable>()
 
     /// The permissions required for full app functionality.
     var allPermissions: [Permission] {
@@ -51,11 +51,23 @@ final class AppPermissions: ObservableObject {
     /// Creates a new permissions manager.
     init() {
         self.updatePermissionsState()
-        self.cancellable = Publishers.MergeMany(allPermissions.map { $0.$hasPermission })
+        Publishers.MergeMany(allPermissions.map { $0.$hasPermission })
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updatePermissionsState()
             }
+            .store(in: &cancellables)
+        // macOS can revoke Screen Recording without relaunching the app. The
+        // live permission is re-polled by ScreenRecordingPermission, but
+        // ScreenCapture caches its own result indefinitely; reset that cache
+        // whenever the permission actually changes, so a revoked grant isn't
+        // masked by a stale cached value (which would silently blank item images).
+        screenRecording.$hasPermission
+            .removeDuplicates()
+            .sink { _ in
+                _ = ScreenCapture.cachedCheckPermissions(reset: true)
+            }
+            .store(in: &cancellables)
     }
 
     /// Updates the current permissions state.

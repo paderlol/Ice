@@ -294,8 +294,13 @@ extension MenuBarItemManager {
 
         for item in items where context.isValidForCaching(item) {
             if item.sourcePID == nil {
-                logger.warning("Missing sourcePID for \(item.logString, privacy: .public)")
-                context.shouldClearCachedItemWindowIDs = true
+                // On macOS 26, the source PID can't be resolved for some items
+                // (see MenuBarItemService). This is an expected steady state, not
+                // a transient error, so don't force a re-cache for it: doing so
+                // clears the cached window IDs every cycle and thrashes the cache.
+                // Resolution retries are handled by the backoff in
+                // MenuBarItemService.Connection.
+                logger.debug("Missing sourcePID for \(item.logString, privacy: .public)")
             }
 
             if let temp = temporarilyShownItemContexts.first(where: { $0.tag == item.tag }) {
@@ -889,9 +894,12 @@ extension MenuBarItemManager {
     ) async throws -> Bool {
         let itemBounds = try await getCurrentBounds(for: item)
         let targetBounds = try await getCurrentBounds(for: destination.targetItem)
+        // Compare with a small tolerance instead of exact equality: window
+        // bounds can carry sub-pixel offsets (notably on macOS 26), and an
+        // exact `==` would never confirm the move, causing repeated retries.
         return switch destination {
-        case .leftOfItem: itemBounds.maxX == targetBounds.minX
-        case .rightOfItem: itemBounds.minX == targetBounds.maxX
+        case .leftOfItem: abs(itemBounds.maxX - targetBounds.minX) <= 1
+        case .rightOfItem: abs(itemBounds.minX - targetBounds.maxX) <= 1
         }
     }
 
