@@ -894,9 +894,12 @@ extension MenuBarItemManager {
     ) async throws -> Bool {
         let itemBounds = try await getCurrentBounds(for: item)
         let targetBounds = try await getCurrentBounds(for: destination.targetItem)
+        // Compare with a small tolerance instead of exact equality: window
+        // bounds can carry sub-pixel offsets (notably on macOS 26), and an
+        // exact `==` would never confirm the move, causing repeated retries.
         return switch destination {
-        case .leftOfItem: itemBounds.maxX == targetBounds.minX
-        case .rightOfItem: itemBounds.minX == targetBounds.maxX
+        case .leftOfItem: abs(itemBounds.maxX - targetBounds.minX) <= 1
+        case .rightOfItem: abs(itemBounds.minX - targetBounds.maxX) <= 1
         }
     }
 
